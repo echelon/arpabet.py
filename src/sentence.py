@@ -31,6 +31,9 @@ ABBREVIATIONS = {
   'sgt.' :  'sergeant',
   'st' : 'saint',
   'st.' : 'saint',
+  # But also,
+  'etc' : 'etcetera',
+  'etc.' : 'etcetera',
 }
 
 class Token:
@@ -83,6 +86,18 @@ class ArpabetToken(Token):
   def __repr__(self):
     return 'Arpabet({})'.format(self._polyphone)
 
+class PluralArpabetToken(ArpabetToken):
+  def __init__(self, polyphone: list):
+    super().__init__(polyphone)
+
+  def encode(self):
+    encoded = super().encode()
+    encoded.append(ALL_SYMBOLS['Z']) # TODO: Or 'S'
+    return encoded
+
+  def __repr__(self):
+    return 'PluralArpabet({}-s)'.format(self._polyphone)
+
 class StartToken(Token):
   def encode(self):
     return ALL_SYMBOLS['StartToken']
@@ -107,7 +122,6 @@ QUESTION_TOKEN = PunctuationToken('Question')
 EXCLAMATION_TOKEN = PunctuationToken('Exclamation')
 
 ARPABET = Arpabet.load_file('./cmudict/cmudict-0.7b')
-
 
 def filter_sentence(sentence_tokens, token_func):
   """
@@ -154,8 +168,44 @@ def arpabet_filter(token):
     return False
   return [ArpabetToken(polyphone)]
 
+def unquote_filter(token):
+  if token.endswith("',") or token.endswith(",'"): # NB: This is garbage
+    token = token[:-2]
+  if token.endswith(",”") or token.endswith("”,"): # NB: This is garbage
+    token = token[:-2]
+  if token.endswith("'"):
+    token = token[:-1]
+  if token.endswith("’"):
+    token = token[:-1]
+  if token.startswith("'"):
+    token = token[1:]
+  if token.startswith("“"):
+    token = token[1:]
+  polyphone = ARPABET.get(token)
+  if not polyphone:
+    return [UnknownToken(token)]
+  return [ArpabetToken(polyphone)]
+
+def plural_possessive_arpabet_filter(token):
+  polyphone = None
+  if token.endswith("'S") or token.endswith("'s"):
+    token = token[:-2]
+    polyphone = ARPABET.get(token)
+  elif token.endswith("S'") or token.endswith("s'"):
+    token = token[:-2]
+    polyphone = ARPABET.get(token)
+  elif token.endswith("S") or token.endswith("s"):
+    token = token[:-1]
+    polyphone = ARPABET.get(token)
+  if not polyphone:
+    return False
+  return [PluralArpabetToken(polyphone)]
+
 def punctuation_filter(token):
   add_token = None
+  if token == '--':
+    # TODO: For now we treat emdash as comma
+    return [COMMA_TOKEN]
   if token.endswith('.'):
     return [
       UnknownToken(token[:-1]),
@@ -187,12 +237,66 @@ def dash_arpabet_filter(token):
     return False
   polyphone_list = []
   for split in splits:
+    if len(split) == 0:
+      continue
     polyphone = ARPABET.get(split)
+    if polyphone:
+      polyphone_list.append(ArpabetToken(polyphone))
+    else:
+      polyphone_list.append(UnknownToken(split))
+  return polyphone_list
+
+def colon_arpabet_filter(token):
+  splits = token.split(':')
+  if len(splits) < 2:
+    return False
+  polyphone_list = []
+  for split in splits:
+    if len(split) == 0:
+      continue
+    polyphone = ARPABET.get(split)
+    if polyphone:
+      polyphone_list.append(ArpabetToken(polyphone))
+    else:
+      polyphone_list.append(UnknownToken(split))
+  return polyphone_list
+
+def undefined_abbreviation_filter(token):
+  splits = token.split('.')
+  if len(splits) < 2:
+    return False
+  letter_polyphones = [] # NB: List of lists
+  for i in range(len(splits)):
+    letter = splits[i]
+    if i == len(splits) - 1 and len(letter) == 0:
+      # Last split is empty string if abbreviation ends with period, eg 'a.b.c.'
+      continue
+    if len(letter) > 1 or len(letter) < 1:
+      return False
+    polyphone = ARPABET.get(letter)
     if not polyphone:
       return False
-    polyphone_list.append(polyphone)
-  return [ArpabetToken(polyphone) for polyphone in polyphone_list]
+    letter_polyphones.append(polyphone)
+  return_tokens = []
+  for i in range(len(letter_polyphones)):
+    polyphones = letter_polyphones[i]
+    if i < len(letter_polyphones) - 1:
+      return_tokens.append(ArpabetToken(polyphones))
+    else:
+      return_tokens.append(ArpabetToken(polyphones))
+      return_tokens.append(SPACE_TOKEN)
+  return return_tokens
 
+def predefined_abbreviation_filter(token):
+  token = token.lower()
+  if token not in ABBREVIATIONS:
+    return False
+  expanded = ABBREVIATIONS[token]
+  polyphone = ARPABET.get(expanded)
+  if polyphone:
+    return [ArpabetToken(polyphone)]
+  else:
+    return [UnknownToken(expanded)]
 
 def encode_sentence(sentence):
   sentence_tokens = sentence_to_tokens(sentence)
@@ -209,7 +313,7 @@ def encode_sentence(sentence):
       continue
     encodings.append(token)
 
-  # TODO
+  # TODO TEMP
   reduced_encodings = []
   for e in encodings:
     if not isinstance(e, int):
@@ -231,90 +335,70 @@ def sentence_to_tokens(sentence):
     token = token.replace('(', '')
     token = token.replace(')', '')
 
-    # TODO:
-    #if token in ['PRS', 'Revill', 'Hosty']:
-    #  continue
+    # NB: These will get picked up by the abbreviation filter later
+    token = token.replace('USSR', 'U.S.S.R')
+    token = token.replace('PRS', 'P.R.S.')
+    token = token.replace('FPCC', 'F.P.C.C.')
+    token = token.replace('WDSU', 'W.D.S.U')
+    token = token.replace('BBL', 'B.B.L.')
+    token = token.replace('UV', 'U.V.')
 
-    #dehyphenated = token.split('-')
-    #if len(dehyphenated) > 1:
-    #  print(token, dehyphenated)
-    #  continue
+    # NB: For a few examples in LJSpeech
+    token = token.replace('ü', 'u')
+    token = token.replace('viz.', 'viz')
+    token = token.replace('Jebb', 'Jeb')
 
     sentence_tokens.append(UnknownToken(token))
-
-    #if add_token:
-    #  sentence_tokens.append(add_token)
 
     if i < len(splits) - 1:
       sentence_tokens.append(SPACE_TOKEN)
 
   sentence_tokens.append(END_TOKEN)
 
-  # Second pass. Look up Arpabet.
+  # Second pass. Apply filters.
 
   filter_sentence(sentence_tokens, arpabet_filter)
+  filter_sentence(sentence_tokens, predefined_abbreviation_filter)
   filter_sentence(sentence_tokens, punctuation_filter)
+  filter_sentence(sentence_tokens, unquote_filter)
   filter_sentence(sentence_tokens, arpabet_filter)
   filter_sentence(sentence_tokens, dash_arpabet_filter)
-
-
-  """
-  for i in range(len(sentence_tokens)):
-    current = sentence_tokens[i]
-    if not isinstance(current, UnknownToken):
-      continue
-    polyphone = ARPABET.get(current.get())
-    if not polyphone:
-      continue
-    sentence_tokens[i] = ArpabetToken(polyphone)
-
-  # Third pass. Correct.
-  i = 0
-  for i < len(sentence_tokens):
-    current = sentence_tokens[i]
-    if isinstance(current, UnknownToken):
-      i += 1
-      continue
-
-    token = current.get()
-
-    add_token = None
-    if token.endswith('.'):
-      token = token[:-1]
-      add_token = PERIOD_TOKEN
-    elif token.endswith(',') \
-        or token.endswith(';') \
-        or token.endswith(':'):
-      # NB: Not tracking colons or semicolons yet
-      token = token[:-1]
-      add_token = COMMA_TOKEN
-    elif token.endswith('?'):
-      token = token[:-1]
-      add_token = QUESTION_TOKEN
-    elif token.endswith('!'):
-      token = token[:-1]
-      add_token = EXCLAMATION_TOKEN
-  """
-
+  filter_sentence(sentence_tokens, colon_arpabet_filter)
+  filter_sentence(sentence_tokens, undefined_abbreviation_filter)
+  filter_sentence(sentence_tokens, predefined_abbreviation_filter)
+  filter_sentence(sentence_tokens, punctuation_filter)
+  filter_sentence(sentence_tokens, plural_possessive_arpabet_filter)
+  filter_sentence(sentence_tokens, arpabet_filter)
 
   return sentence_tokens
 
 if __name__ == '__main__':
-  result = encode_sentence("this is the song that never ends, it goes on and on.")
-
   sentences = ljspeech.read_file('/home/bt/datasets/LJSpeech-1.1/metadata.csv')
 
   good = 0
   bad = 0
+  unknown_symbols = {}
   for sentence in sentences:
     result = encode_sentence(sentence)
     if not result:
       good += 1
     if result:
+      tokens = sentence_to_tokens(sentence)
       bad += 1
-      print(result)
+      for symbol in result:
+        symbol = symbol.get()
+        if symbol not in unknown_symbols:
+          unknown_symbols[symbol] = 0
+        unknown_symbols[symbol] += 1
 
+  print('')
+  for key, value in sorted(unknown_symbols.items(), key=lambda item: item[1]):
+    print('{}: {}'.format(key, value))
+
+  print('')
   print('Good: {}'.format(good))
   print('Bad: {}'.format(bad))
+  print('Unknown Symbols: {}'.format(len(unknown_symbols.keys())))
 
+# TODO: Add tests
 
