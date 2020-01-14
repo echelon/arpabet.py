@@ -3,7 +3,7 @@
 from arpabet import Arpabet
 from encoding import ALL_SYMBOLS
 from regex import SPACE_SPLIT
-import ljspeech
+#import ljspeech
 
 # Per the LJSpeech website, these are some expected abbreviations:
 # https://keithito.com/LJ-Speech-Dataset/
@@ -313,12 +313,7 @@ def encode_sentence(sentence):
       continue
     encodings.append(token)
 
-  # TODO TEMP
-  reduced_encodings = []
-  for e in encodings:
-    if not isinstance(e, int):
-      reduced_encodings.append(e)
-  return reduced_encodings
+  return encodings
 
 def sentence_to_tokens(sentence):
   sentence_tokens = [START_TOKEN]
@@ -373,7 +368,8 @@ def sentence_to_tokens(sentence):
   return sentence_tokens
 
 if __name__ == '__main__':
-  sentences = ljspeech.read_file('/home/bt/datasets/LJSpeech-1.1/metadata.csv')
+  import ljspeech
+  sentences = ljspeech.read_sentences('/home/bt/datasets/LJSpeech-1.1/metadata.csv')
 
   good = 0
   bad = 0
