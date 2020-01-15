@@ -27,6 +27,10 @@ def filter_file(input_filename, output_filename):
       filter_file_csv(reader, writer)
 
 def filter_file_csv(csv_reader, csv_writer):
+  """
+  Read LJSpeech metadata.csv, filter out things we can't parse, then save the
+  good (passing) examples into a new file.
+  """
   success_count = 0
   failure_count = 0
 
